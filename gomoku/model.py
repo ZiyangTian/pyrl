@@ -79,6 +79,8 @@ class MCTNode(object):
         return self._visit_times
 
     def get_value(self, c_puct):
+        if self.is_root():
+            raise ValueError('Cannot get_value of a root node.')
         u = c_puct * self.prob * math.sqrt(self.parent.visit_times)
         u /= 1. + self.visit_times
         return self._quality_value + u
@@ -91,11 +93,11 @@ class MCTNode(object):
             move: A `Move` instance.
             node: An `MCTNode` instance, child node of branch `move`.
         """
-        return max(self._children.items(), key=lambda k, v: v.get_value(c_puct))
+        return max(self._children.items(), key=lambda item: item[1].get_value(c_puct))
 
     def backup(self, new_value):
         if not self.is_root():
-            self.parent.update_recursively(-new_value)  # for piece type is different.
+            self.parent.backup(-new_value)  # for piece type is different.
         self._visit_times += 1
         self._quality_value += (new_value - self._quality_value) / self._visit_times
 
@@ -119,7 +121,7 @@ class DeepMCTS(collections.namedtuple(
         super(DeepMCTS, self).__init__()
         self._root = MCTNode()
 
-    def _playout(self, game_data:game.GameData):
+    def _playout(self, game_data: game.GameData):
         """ use initial game_data """
         node = self._root
         game_data = copy.deepcopy(game_data)
@@ -226,7 +228,10 @@ class PolicyValueNet(tf.keras.Model):
             self._value_dense_2])(outputs)
         return action_probs, value
 
-    def policy_value_fn(self, state):
-        state_value = tf.expand_dims(state.value, axis=0)
-        action_probs, value = self.call(state_value)
-        return tf.squeeze(action_probs, axis=0).numpy(), tf.squeeze(value).numpy()
+    def get_policy_value_fn(self):
+        def policy_value_fn(state):
+            state_value = tf.expand_dims(state.value, axis=0)
+            action_probs, value = self.call(state_value)
+            return tf.squeeze(action_probs, axis=0).numpy(), tf.squeeze(value).numpy()
+
+        return policy_value_fn

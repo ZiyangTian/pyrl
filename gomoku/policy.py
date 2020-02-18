@@ -31,8 +31,11 @@ class MCTNode(object):
         return self._visit_times
 
     def get_value(self, c_puct):
-        u = c_puct * self.prob * math.sqrt(self.parent.visit_times)
-        u /= 1. + self.visit_times
+        if not self.is_root():
+            u = c_puct * self.prob * math.sqrt(self.parent.visit_times)
+            u /= 1. + self.visit_times
+        else:
+            u = 0.
         return self._quality_value + u
 
     def select(self, c_puct):
@@ -47,7 +50,7 @@ class MCTNode(object):
 
     def backup(self, new_value):
         if not self.is_root():
-            self.parent.update_recursively(-new_value)  # for piece type is different.
+            self.parent.backup(-new_value)  # for piece type is different.
         self._visit_times += 1
         self._quality_value += (new_value - self._quality_value) / self._visit_times
 
@@ -62,6 +65,17 @@ class DeepMCTS(collections.namedtuple(
     'DeepMCTS', (
         'policy_value_fn',
         'c_puct'))):
+    """DNN policy_value_fn based Mente Carlo tree searching.
+
+    Arguments
+        policy_value_fn: A function which takes a state value as input and output
+            a tuple of (`action_probs`, `value`), where `action_probs` as a
+            `np.ndarray` of shape (`row_size`, `colums_size`), representing the
+            probabilities of each move, and `value` is a `float`, representing the
+            value of the state.
+        c_puct: A `float`, parameter to control exploration and exploitation.
+    """
+
     def __new__(cls, policy_value_fn, c_puct=5.):
         return super(DeepMCTS, cls).__new__(cls, policy_value_fn, c_puct)
 
@@ -71,7 +85,7 @@ class DeepMCTS(collections.namedtuple(
         super(DeepMCTS, self).__init__()
         self._root = MCTNode()
 
-    def _playout(self, game_data:game.GameData):
+    def _playout(self, game_data: game.GameData, policy_value_fn):
         """ use initial game_data """
         node = self._root
         game_data = copy.deepcopy(game_data)
@@ -83,7 +97,7 @@ class DeepMCTS(collections.namedtuple(
         winner = game_data.winner
         if winner is None:
             turn, available_positions = game_data.turn, game_data.available_positions
-            probs, value = self.policy_value_fn(game_data)
+            probs, value = policy_value_fn(game_data)
             for r in range(game_data.setting.row_size):
                 for c in range(game_data.setting.column_size):
                     if available_positions.astype(np.bool)[r][c]:
@@ -100,11 +114,11 @@ class DeepMCTS(collections.namedtuple(
         x /= np.sum(x)
         return x
 
-    def get_move_probs(self, game_data: game.GameData, times=10000, temperature=1e-3):
+    def get_move_probs(self, game_data: game.GameData, policy_value_fn, times=10000, temperature=1e-3):
         """Run all playouts in turn.  """
         for _ in range(times):
             game_data = copy.deepcopy(game_data)
-            self._playout(game_data)
+            self._playout(game_data, policy_value_fn)
 
         moves, visit_times = zip([(move, node.visit_times) for move, node in self._root.children.items()])
         probs = self._stable_softmax(np.log(np.array(visit_times) / temperature + 1.e-10))

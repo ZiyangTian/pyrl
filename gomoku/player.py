@@ -1,4 +1,5 @@
 import abc
+import collections
 import random
 import time
 import numpy as np
@@ -122,6 +123,7 @@ class Agent(Player):
             if winner is not None:
                 return states, probs, turns, winner
 
-
-
-
+    def collect_selfplay_data(self, game_setting, n_games):
+        data_buffer = collections.deque(maxlen=n_games)
+        for i in range(n_games):
+            data_buffer.append(self.self_play(game_setting))
