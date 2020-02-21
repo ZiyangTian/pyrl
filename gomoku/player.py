@@ -1,17 +1,20 @@
 import abc
-import collections
 import random
 import time
 import numpy as np
 
 from gomoku import game
 from gomoku import model
-from gomoku import policy as mcts_policy
 
 
 class Player(object):
-    def __init__(self, name):
+    def __init__(self, name, game_setting: game.GameSetting):
         self._name = name
+        self._game_setting = game_setting
+
+    @property
+    def name(self):
+        return self._name
 
     @abc.abstractmethod
     def get_action(self, game_data):
@@ -20,8 +23,8 @@ class Player(object):
 
 class RandomPlayer(Player):
     """A naive random moving player, who will move at a random available position."""
-    def __init__(self, name, sleep=None):
-        super(RandomPlayer, self).__init__(name)
+    def __init__(self, name, game_setting, sleep=None):
+        super(RandomPlayer, self).__init__(name, game_setting)
         self._sleep = sleep
 
     def get_action(self, game_data):
@@ -44,26 +47,28 @@ class HumanPlayer(Player):
         piece: An enumeration among `Piece.black` or `Piece.white`,  piece type of the player.
         interface: An `Interface` instance.
     """
-    def __init__(self, name, interface):
-        """
-
-
-        """
-        super(HumanPlayer, self).__init__(name)
+    def __init__(self, name, game_setting, interface):
+        super(HumanPlayer, self).__init__(name, game_setting)
         self._interface = interface
 
     def get_action(self, game_data):
         return self._interface.get_move()
 
 
-class Agent(Player):
-    def __init__(self, name, policy: mcts_policy.DeepMCTS, piece=game.Piece.none):
-        super(Agent, self).__init__(name)
-        self._policy = policy
+class DeepMCTSAgent(Player):
+    def __init__(self, name, game_setting, policy_value_fn, **kwargs):
+        super(DeepMCTSAgent, self).__init__(name, game_setting)
+        self._policy_value_fn = policy_value_fn
+        self._mcts_config = kwargs
+        self._policy = None
+        self.reset()
+
+    def reset(self):
+        self._policy = model.DeepMCTS(**self._mcts_config)
 
     def get_action(self, game_data: game.GameData,
                    return_state=False, return_probs=False,
-                   is_self_play=False, temperature=1e-3):
+                   is_self_play=False, playout_times=10000, temperature=1e-3):
         """Get action according to game state.
         Arguments
             game_data: A `GameData` instance.
@@ -72,7 +77,7 @@ class Agent(Player):
             is_self_play: A `bool`, whether the agent is playing with itself.
             temperature: A float, temperature variable to control exploitation and exploration.
         Returns
-            A single `Move` instance or a tuple.
+            A single `Move` instance or a `tuple`.
             move: A `Move` instance.
             state: Optional, A `State` instance.
             probs_array: A `np.ndarray` instance of shape (`row_size`, `column_size`).
@@ -82,12 +87,15 @@ class Agent(Player):
         if not available_positions.any():
             raise ValueError('There is no available position in the board.')
 
-        moves, probs = self._policy.get_move_probs(game_data, temperature)
+        moves, probs = self._policy.get_move_probs(
+            game_data, self._policy_value_fn, times=playout_times, temperature=temperature)
+        probs = np.array(probs)
 
         if is_self_play:
-            move = np.random.choice(
-                moves,
+            move_i = np.random.choice(
+                range(len(moves)),  # `Move` object has `__len__` method, thus can be transformed as a `np.ndarray`.
                 p=0.75 * probs + 0.25 * np.random.dirichlet(0.3 * np.ones(len(probs))))
+            move = moves[move_i]
             self._policy.move(move)
         else:
             move = np.random.choice(moves, p=probs)
@@ -96,34 +104,39 @@ class Agent(Player):
         state = model.State(game_data) if return_state else None
         returns = (move,)
         if return_state:
-            returns += state
+            returns += (state,)
         if return_probs:
-            probs_array = np.zeros_like(available_positions)
-            for m in moves:
-                probs_array[m.row, m.column] = probs[m.row, m.column]
-            returns += probs_array
+            probs_array = np.zeros_like(available_positions, dtype=np.float)
+            for m, p in zip(moves, probs):
+                probs_array[m.row, m.column] = p
+            returns += (probs_array,)
         if len(returns) == 0:
             returns = returns[0]
         return returns
 
-    def self_play(self, game_setting: game.GameSetting):
+    def self_play(self):
+        """Complete one self-play and return the history and the final data.
+        Returns
+            A `tuple` of (`states`, `probs`, `turns`, `winner`, `game_data`):
+                states: A `list` of `State` instance.
+                probs: A `list` of `np.ndarray` of shape (`row_size`, `column_size`).
+                turns: A `list` containint `Piece.black` and `Piece.white`.
+                winner: An enumeration of `Piece` object.
+                game_data: A `GameData` instance.
+        """
         states, probs, turns = [], [], []
-        data = game.GameData(game_setting)
-        data.reset()
+        game_data = game.GameData(self._game_setting)
+        game_data.reset()
 
         while True:
-            (row, column), state, prob = self.get_action(
-                data, return_state=True, return_probs=True)
+            self.reset()
+            move, state, prob = self.get_action(
+                game_data, return_state=True, return_probs=True, is_self_play=True, playout_times=100)
             states.append(state)
             probs.append(prob)
-            turns.append(data.turn)
+            turns.append(game_data.turn)
 
-            data.move(row, column)
-            winner = data.winner
+            game_data.move(move.row, move.column)
+            winner = game_data.winner
             if winner is not None:
-                return states, probs, turns, winner
-
-    def collect_selfplay_data(self, game_setting, n_games):
-        data_buffer = collections.deque(maxlen=n_games)
-        for i in range(n_games):
-            data_buffer.append(self.self_play(game_setting))
+                return states, probs, turns, winner, game_data

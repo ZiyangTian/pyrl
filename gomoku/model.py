@@ -108,12 +108,9 @@ class MCTNode(object):
         return self._children == {}
 
 
-class DeepMCTS(collections.namedtuple(
-    'DeepMCTS', (
-        'policy_value_fn',
-        'c_puct'))):
-    def __new__(cls, policy_value_fn, c_puct=5.):
-        return super(DeepMCTS, cls).__new__(cls, policy_value_fn, c_puct)
+class DeepMCTS(collections.namedtuple('DeepMCTS', ('c_puct',))):
+    def __new__(cls, c_puct=5.):
+        return super(DeepMCTS, cls).__new__(cls, c_puct)
 
     def __init__(self, *args, **kwargs):
         del args
@@ -121,28 +118,28 @@ class DeepMCTS(collections.namedtuple(
         super(DeepMCTS, self).__init__()
         self._root = MCTNode()
 
-    def _playout(self, game_data: game.GameData):
+    def _playout(self, game_data: game.GameData, policy_value_fn):
         """ use initial game_data """
         node = self._root
         game_data = copy.deepcopy(game_data)
 
         while not node.is_leaf():
             move, node = node.select(self.c_puct)
-            game_data.move(move)
+            game_data.move(move.row, move.column)
 
         winner = game_data.winner
         if winner is None:
             turn, available_positions = game_data.turn, game_data.available_positions
-            probs, value = self.policy_value_fn(game_data)
+            probs, value = policy_value_fn(State(game_data))
             for r in range(game_data.setting.row_size):
                 for c in range(game_data.setting.column_size):
                     if available_positions.astype(np.bool)[r][c]:
-                        node.expend(game.Move(turn, r, c), probs[r][c])
+                        node.expand(game.Move(turn, r, c), probs[r][c])
         elif winner is game.Piece.none:
             value = 0.
         else:
             value = float(winner is game_data.turn)
-        node.update_backup(-value)  # ???
+        node.backup(-value)  # ???
 
     @staticmethod
     def _stable_softmax(x):
@@ -150,13 +147,13 @@ class DeepMCTS(collections.namedtuple(
         x /= np.sum(x)
         return x
 
-    def get_move_probs(self, game_data: game.GameData, times=10000, temperature=1e-3):
+    def get_move_probs(self, game_data: game.GameData, policy_value_fn, times=10000, temperature=1e-3):
         """Run all playouts in turn.  """
         for _ in range(times):
             game_data = copy.deepcopy(game_data)
-            self._playout(game_data)
+            self._playout(game_data, policy_value_fn)
 
-        moves, visit_times = zip([(move, node.visit_times) for move, node in self._root.children.items()])
+        moves, visit_times = zip(*[(move, node.visit_times) for move, node in self._root.children.items()])
         probs = self._stable_softmax(np.log(np.array(visit_times) / temperature + 1.e-10))
         return moves, list(probs)
 
@@ -173,65 +170,83 @@ class DeepMCTS(collections.namedtuple(
 class PolicyValueNet(tf.keras.Model):
     def __init__(self, game_setting, regularizer_rate=0.001):
         super(PolicyValueNet, self).__init__()
-        row_size = game_setting.row_size
-        column_size = game_setting.column_size
+        self._row_size = game_setting.row_size
+        self._column_size = game_setting.column_size
 
         def get_regularizer():
             return tf.keras.regularizers.l2(regularizer_rate)
 
-        self._input = tf.keras.layers.InputLayer(input_shape=[column_size, row_size, 4])
-        self._conv_1 = tf.keras.layers.Conv2D(
+        inputs = tf.keras.layers.InputLayer(input_shape=[self._column_size, self._row_size, 4])
+        conv_1 = tf.keras.layers.Conv2D(
             32, [3, 3],
             padding='same', kernel_regularizer=get_regularizer(), activation='relu', name='conv_1')
-        self._conv_2 = tf.keras.layers.Conv2D(
+        conv_2 = tf.keras.layers.Conv2D(
             64, [3, 3],
             padding='same', kernel_regularizer=get_regularizer(), activation='relu', name='conv_2')
-        self._conv_3 = tf.keras.layers.Conv2D(
+        conv_3 = tf.keras.layers.Conv2D(
             128, [3, 3],
             padding='same', kernel_regularizer=get_regularizer(), activation='relu', name='conv_3')
+        self._encoder = tf.keras.Sequential([inputs, conv_1, conv_2, conv_3], name='encoder')
 
-        self._action_conv = tf.keras.layers.Conv2D(
+        action_conv = tf.keras.layers.Conv2D(
             4, [1, 1],
             padding='same', kernel_regularizer=get_regularizer(), activation='relu', name='action_conv')
-        self._action_conv_flatten = tf.keras.layers.Flatten(name='action_conv_flatten')
-        self._action_dense = tf.keras.layers.Dense(
-            row_size * column_size,
+        action_conv_flatten = tf.keras.layers.Flatten(name='action_conv_flatten')
+        action_dense = tf.keras.layers.Dense(
+            self._row_size * self._column_size,
             kernel_regularizer=get_regularizer(), activation='softmax', name='action_dense')
-        self._action_reshape = tf.keras.layers.Reshape((row_size, column_size))
+        self._action_prob_decoder = tf.keras.Sequential([
+            action_conv, action_conv_flatten, action_dense], name='action_prob_decoder')
 
-        self._value_conv = tf.keras.layers.Conv2D(
+        value_conv = tf.keras.layers.Conv2D(
             2, [1, 1],
             padding='same', kernel_regularizer=get_regularizer(), activation='relu', name='value_conv')
-        self._value_flatten = tf.keras.layers.Flatten(name='value_flatten')
-        self._value_dense_1 = tf.keras.layers.Dense(
+        value_flatten = tf.keras.layers.Flatten(name='value_flatten')
+        value_dense_1 = tf.keras.layers.Dense(
             64,
             kernel_regularizer=get_regularizer(), activation='relu', name='value_dense_1')
-        self._value_dense_2 = tf.keras.layers.Dense(
+        value_dense_2 = tf.keras.layers.Dense(
             1,
-            kernel_regularizer=get_regularizer(), activation='relu', name='value_dense_2')
+            kernel_regularizer=get_regularizer(), activation='tanh', name='value_dense_2')
+        self._value_decoder = tf.keras.Sequential([
+            value_conv, value_flatten, value_dense_1, value_dense_2], name='value_decoder')
 
     def call(self, inputs):
-        outputs = tf.keras.Sequential([
-            self._input,
-            self._conv_1,
-            self._conv_2,
-            self._conv_3])(inputs)
-        action_probs = tf.keras.Sequential([
-            self._action_conv,
-            self._action_conv_flatten,
-            self._action_dense,
-            self._action_reshape])(outputs)
-        value = tf.keras.Sequential([
-            self._value_conv,
-            self._value_flatten,
-            self._value_dense_1,
-            self._value_dense_2])(outputs)
+        outputs = self._encoder(inputs)
+        action_probs = self._action_prob_decoder(outputs)
+        value = self._value_decoder(outputs)
         return action_probs, value
 
-    def get_policy_value_fn(self):
-        def policy_value_fn(state):
+    @staticmethod
+    def _prob_loss(y_true, y_pred):
+        flatten_fn = tf.keras.layers.Flatten()
+        y_true = flatten_fn(y_true)
+        y_pred = flatten_fn(y_pred)
+        return tf.keras.losses.cosine_similarity(y_true, y_pred)
+
+    def compiled(self):
+        self.compile(
+            tf.keras.optimizers.Adam(),
+            loss=[tf.keras.losses.CosineSimilarity, tf.keras.losses.MSE],
+            metrics=[tf.keras.metrics.CategoricalCrossentropy, tf.keras.metrics.MSE],
+            loss_weights=None)
+
+    @property
+    def policy_value_fn(self):
+        def _policy_value_fn(state):
             state_value = tf.expand_dims(state.value, axis=0)
             action_probs, value = self.call(state_value)
+            action_probs = tf.reshape(action_probs, (self._row_size, self._column_size))
             return tf.squeeze(action_probs, axis=0).numpy(), tf.squeeze(value).numpy()
 
-        return policy_value_fn
+        return _policy_value_fn
+
+
+def random_policy_value_fn(state):
+    row_size, column_size = state.value.shape[0: 2]
+    logits = np.random.random((row_size * column_size))
+    logits = np.exp(logits)
+    logits_sum = sum(logits)
+    probs = np.reshape(logits / logits_sum, (row_size, column_size))
+    value = np.random.random()
+    return probs, value

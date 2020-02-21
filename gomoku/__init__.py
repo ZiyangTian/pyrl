@@ -5,7 +5,11 @@ from gomoku.game import GameData
 from gomoku.game import Game
 from gomoku.player import RandomPlayer
 from gomoku.player import HumanPlayer
+from gomoku.player import DeepMCTSAgent
 from gomoku.model import State
 from gomoku.model import MCTNode
 from gomoku.model import DeepMCTS
 from gomoku.model import PolicyValueNet
+from gomoku.model import random_policy_value_fn
+from gomoku.data import DataGenerator
+from gomoku.config import Config

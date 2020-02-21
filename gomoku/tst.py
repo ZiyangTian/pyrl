@@ -1,6 +1,7 @@
 import collections
-
-from gomoku import *
+import sys
+# import gomoku
+# from gomoku import *
 
 
 def main():
@@ -11,21 +12,13 @@ def main():
     game.play(display=True)
 
 
-class Node(collections.namedtuple(
-    'Node', (
-        'state',
-        'prob',
-        'parent'))):
-    def __init__(self, *args, **kwargs):
-        del args
-        del kwargs
-        super(Node, self).__init__()
-        self._children = []
-        self._visit_times = 0
-        self._quality_value = 0.0
-
-
 def main1():
+    game_setting = GameSetting(6, 6, 4)
+    game_data = GameData(game_setting)
+    state = State(game_data)
+    mcts = DeepMCTS()
+    result = mcts.get_move_probs(game_data, gomoku.model.random_policy_value_fn, times=100)
+
     node_0 = MCTNode()
     # node_1 = MCTNode(node_0, 0.5)
     # node_2 = MCTNode(node_0, 0.5)
@@ -36,6 +29,16 @@ def main1():
     node_2.backup(2.)
 
 
+def main2():
+    game_setting = GameSetting(6, 6, 4)
+    policy_value_fn = PolicyValueNet(game_setting).policy_value_fn
+    agent = DeepMCTSAgent('agent', game_setting, policy_value_fn)
+    # states, probs, turns, winner, data = agent.self_play(game_setting)
+    data_generator = DataGenerator(agent, 100)
+    data_generator.generate_new_data(1)
+
+
 if __name__ == '__main__':
-    main()
+    # main2()
     # n = Node(1, 2, 3)
+    print(sys.argv)
