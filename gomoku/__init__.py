@@ -3,9 +3,9 @@ from gomoku.game import Move
 from gomoku.game import GameSetting
 from gomoku.game import GameData
 from gomoku.game import Game
-from gomoku.player import RandomPlayer
-from gomoku.player import HumanPlayer
-from gomoku.player import DeepMCTSAgent
+from gomoku.players import RandomPlayer
+from gomoku.players import HumanPlayer
+from gomoku.players import DeepMCTSAgent
 from gomoku.model import State
 from gomoku.model import MCTNode
 from gomoku.model import DeepMCTS

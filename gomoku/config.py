@@ -10,31 +10,24 @@ class Config(object):
 
     # mcts
     temperature = 1.0
-    n_playout = 400  # num of simulations for each move
-    c_puct = 5
+    playout_times = 100  # num of simulations for each move
+    c_puct = 5.
 
     # data
-    num_games_per_generation = 100
+    num_games_per_generation = 10
 
-    batch_size = 512  # mini-batch size for training
+    batch_size = 32  # mini-batch size for training
     buffer_size = 10000
-    play_batch_size = 1
-    epochs = 5  # num of train_steps for each update
     data_buffer_size = 10000
 
     # train
+    epoch_per_dataset = 5  # num of train_steps for each update
     max_epochs = 1000
-    learning_rate = 1e-3
-    lr_multiplier = 1.0  # adaptively adjust the learning rate based on KL
-
-    # data_buffer = deque(maxlen=self.buffer_size)
-    # kl_targ = 0.02
-    # check_freq = 50
-    # game_batch_num = 1500
-    # best_win_ratio = 0.0
+    # learning_rate = 1e-3
+    # lr_multiplier = 1.0  # adaptively adjust the learning rate based on KL
 
     # saved model
-    saved_model_file = 'saved/model'
+    saved_dir = 'saved'
 
     def __init__(self, **kwargs):
         for k, v in kwargs:

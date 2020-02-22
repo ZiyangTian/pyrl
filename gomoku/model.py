@@ -217,19 +217,13 @@ class PolicyValueNet(tf.keras.Model):
         value = self._value_decoder(outputs)
         return action_probs, value
 
-    @staticmethod
-    def _prob_loss(y_true, y_pred):
-        flatten_fn = tf.keras.layers.Flatten()
-        y_true = flatten_fn(y_true)
-        y_pred = flatten_fn(y_pred)
-        return tf.keras.losses.cosine_similarity(y_true, y_pred)
-
     def compiled(self):
         self.compile(
             tf.keras.optimizers.Adam(),
-            loss=[tf.keras.losses.CosineSimilarity, tf.keras.losses.MSE],
-            metrics=[tf.keras.metrics.CategoricalCrossentropy, tf.keras.metrics.MSE],
+            loss=['cosine_similarity', 'mse'],
+            metrics=['categorical_crossentropy', 'mse'],
             loss_weights=None)
+        return self
 
     @property
     def policy_value_fn(self):
@@ -237,7 +231,7 @@ class PolicyValueNet(tf.keras.Model):
             state_value = tf.expand_dims(state.value, axis=0)
             action_probs, value = self.call(state_value)
             action_probs = tf.reshape(action_probs, (self._row_size, self._column_size))
-            return tf.squeeze(action_probs, axis=0).numpy(), tf.squeeze(value).numpy()
+            return action_probs.numpy(), tf.squeeze(value).numpy()
 
         return _policy_value_fn
 

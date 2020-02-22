@@ -2,11 +2,6 @@ import collections
 import numpy as np
 import tensorflow as tf
 
-from gomoku import game
-from gomoku import model
-from gomoku import player
-from gomoku import policy
-
 
 class DataGenerator(object):
     def __init__(self, agent, volume):
@@ -34,14 +29,18 @@ class DataGenerator(object):
             (np.rot90(state_value_flip, k=2), np.rot90(prob_flip, k=2), win),
             (np.rot90(state_value_flip, k=3), np.rot90(prob_flip, k=3), win)]
 
-    def generate_new_data(self, num_games=1):
+    def generate_new_data(self, num_games=1, playout_times=100, temperature=1.):
         for _ in range(num_games):  # TODO: add parallelism.
-            states, probs, turns, winner, _ = self._agent.self_play()
+            states, probs, turns, winner, _ = self._agent.self_play(
+                playout_times=playout_times, temperature=temperature)
             source_data = self.transform_self_play_data(states, probs, turns, winner)
             for state_value, prob, win in source_data:
                 self._data_buffer.extend(self.get_equivalent_data(state_value, prob, win))
 
     def get_dataset(self):
-        dataset = tf.data.Dataset.from_tensor_slices(list(self._data_buffer))
-        dataset = dataset.map(lambda state_value, prob, win: (state_value, (prob, win)))
+        state_values, probs, wins = zip(*self._data_buffer)
+        state_values_dataset = tf.data.Dataset.from_tensor_slices(list(state_values))
+        probs_dataset = tf.data.Dataset.from_tensor_slices(list(probs)).map(lambda t: tf.reshape(t, (-1,)))
+        wins_dataset = tf.data.Dataset.from_tensor_slices(list(wins)).map(lambda w: tf.cast(w, tf.float64))
+        dataset = tf.data.Dataset.zip((state_values_dataset, (probs_dataset, wins_dataset)))
         return dataset

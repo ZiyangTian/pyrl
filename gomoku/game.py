@@ -2,8 +2,6 @@ import collections
 import enum
 import numpy as np
 
-from gomoku.visualization import base as visualization_base
-
 
 class Piece(enum.Enum):
     """Gomoku piece type.
@@ -215,69 +213,3 @@ class GameData(object):
         repr_str += "└" + "─" * (3 * column_size) + "┘\n"
 
         return repr_str
-
-
-class Game(GameData):
-    """Gomoku game environment. The game starts with two player and ends with one winner or a tie.
-
-    Properties
-        setting: A `GameSetting` instance.
-        num_round: An `int`, the current number of game rounds.
-        turn: `Piece.black` or `Piece.white`, the game turn.
-        pieces: A 2-D `int` numpy array of shape (`row_size`, `column_size`), each element of which
-            represents the value of piece (see class `Piece`).
-        black_pieces: A binary 2-D `int` numpy array of shape (`row_size`, `column_size`), represents
-            the positions of black pieces.
-        white_pieces: A binary 2-D `int` numpy array of shape (`row_size`, `column_size`), represents
-            the positions of white pieces.
-        available_positions: A binary 2-D `int` numpy array of shape (`row_size`, `column_size`),
-            represents the positions of available positions.
-        winner: None or the winning player.
-
-    Arguments
-        game_setting: A `GameSetting` instance, the setting used in the game.
-        black_piece_player: A `Player` instance, the player to play black pieces.
-        white_piece_player: A `Player` instance, the player to play white pieces.
-        visualization: A `Visualization` instance, the display mode.
-    """
-    def __init__(self,
-                 game_setting,
-                 black_piece_player, white_piece_player,
-                 visualization=None):
-
-        """ display_mode: None, terminal, graphic"""
-        super(Game, self).__init__(game_setting)
-        self._black_piece_player = black_piece_player
-        self._white_piece_player = white_piece_player
-        if type(visualization) is str:
-            self._visualization = ''
-        elif type(visualization) is visualization_base.Visualization:
-            self._visualization = visualization
-        else:
-            self._visualization = None
-
-    def play(self, display=False):
-        """Play one game until ending.
-        Arguments
-            display:
-        Returns
-            The winner.
-        """
-        self.reset()
-        while True:
-            if self._turn is Piece.black:
-                row, column = self._black_piece_player.get_action(super(Game, self))
-            else:
-                row, column = self._white_piece_player.get_action(super(Game, self))
-            self.move(row, column)
-
-            # TODO: ...
-            if display:
-                print(self)
-                print('row:{}, column:{}'.format(row, column))
-                print()
-
-            if self.winner is not None:
-                if display:
-                    print('winner: {}'.format(self._winner))
-                return self.winner
